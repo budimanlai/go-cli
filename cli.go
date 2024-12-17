@@ -13,7 +13,6 @@ type Cli struct {
 	Version string
 
 	Args    *goargs.Args
-	Config  Config
 	handler map[string]CliHandler
 }
 
