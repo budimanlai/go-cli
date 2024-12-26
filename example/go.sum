@@ -1,2 +1,11 @@
 github.com/budimanlai/go-args v0.0.1 h1:4prgT5lq4NdUU7GSrb7v5gGYajZD0v9v1s79DAWjwuI=
 github.com/budimanlai/go-args v0.0.1/go.mod h1:b0bfforNqR+7uI0xslP67t+5pztrU0vUnCTzeqXnS8o=
+github.com/budimanlai/go-config v0.0.1 h1:gmp7ruxdvwBBCcJq7dg+CWV8KHXo+3H1tj79xJOcZps=
+github.com/budimanlai/go-config v0.0.1/go.mod h1:0sH0WYBNKewFlo9Tl+Xi9CSwJ5IC7kEEgqvDluPEpXc=
+github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
+github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
+github.com/stretchr/testify v1.5.1/go.mod h1:5W2xD1RspED5o8YsWQXVCued0rvSQ+mT+I5cxcmMvtA=
+gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
+gopkg.in/yaml.v2 v2.2.2/go.mod h1:hI93XBmqTisBFMUTm0b8Fm+jr3Dg1NNxqwp+5A1VGuI=
