@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -106,42 +107,87 @@ func (c *Cli) Log(a ...interface{}) {
 }
 
 func (c *Cli) Listen(handler CliListen) {
+	// Channel untuk menangkap sinyal sistem
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP) // Tambahkan SIGHUP untuk reload
 
-	done := make(chan bool, 1)
+	var wg sync.WaitGroup // WaitGroup untuk sinkronisasi tugas
+	var mutex sync.Mutex  // Mutex untuk status shutdown
 
+	if handler.TimeLoop < 2 {
+		handler.TimeLoop = 2 // Default minimum 2 detik
+	}
+	ticker := time.NewTicker(handler.TimeLoop * time.Second)
+	defer ticker.Stop() // Pastikan ticker berhenti saat keluar
+
+	// Goroutine untuk menangani sinyal
 	go func() {
-		sig := <-sigs
+		for sig := range sigs {
+			switch sig {
+			case syscall.SIGHUP: // Reload konfigurasi
+				c.Log("Sinyal reload konfigurasi diterima.")
+				go func() {
+					c.Log("Memuat ulang konfigurasi...")
+					tempConfig := &goconfig.Config{}
+					err := tempConfig.Open(c.configFile...)
+					if err != nil {
+						c.Log("Gagal memuat konfigurasi:", err)
+						return
+					}
 
-		signal.Stop(sigs)
-		close(sigs)
+					newConfig := *tempConfig // Buat salinan di luar mutex
+					mutex.Lock()
+					c.Config = &newConfig
+					mutex.Unlock()
+					c.Log("Konfigurasi berhasil dimuat ulang.")
+				}()
 
-		c.IsShutdown = true
+			case syscall.SIGINT, syscall.SIGTERM: // Shutdown
+				// Tandai shutdown
+				mutex.Lock()
+				c.IsShutdown = true
+				mutex.Unlock()
 
-		c.Log(sig)
-		if handler.OnShutdown != nil {
-			handler.OnShutdown()
-			c.Log("Service stoped...")
-			os.Exit(0)
+				// Menjalankan handler OnShutdown jika ada
+				if handler.OnShutdown != nil {
+					wg.Add(1)
+
+					// Eksekusi handler dalam goroutine terpisah
+					go func() {
+						defer wg.Done()
+						defer func() {
+							if r := recover(); r != nil {
+								c.Log("Panic terdeteksi di OnShutdown:", r)
+							}
+						}()
+						c.Log("Start shutdown...")
+						handler.OnShutdown()
+						c.Log("Shutdown done...")
+					}()
+				}
+
+				wg.Wait()
+				os.Exit(0) // Keluar setelah semua tugas selesai
+			}
 		}
-
-		done <- true
 	}()
 
+	// Loop utama untuk menjalankan tugas
 	c.IsShutdown = false
 	if handler.OnLoop != nil {
-		if handler.TimeLoop < 2 {
-			handler.TimeLoop = 2
-		}
-		for {
+		for range ticker.C { // Menggunakan for range
+			mutex.Lock()
 			if c.IsShutdown {
-				<-done
-				break
+				mutex.Unlock()
+				c.Log("Waiting shutdown")
+				wg.Wait()
+				return
 			}
+			mutex.Unlock()
 
-			handler.OnLoop()
-			time.Sleep(handler.TimeLoop * time.Second)
+			wg.Add(1)        // Sinkronisasi tugas
+			handler.OnLoop() // Proses tugas (blocking)
+			wg.Done()
 		}
 	}
 }
