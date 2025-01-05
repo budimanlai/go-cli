@@ -12,8 +12,8 @@ func Listen(c *gocli.Cli) {
 
 	number := c.Args.GetIntOr("number", 1)
 
-	c.Listen(gocli.CliListen{
-		TimeLoop: 4,
+	c.RunLoop(gocli.CliRunLoop{
+		TimeLoop: 2 * time.Second,
 		OnLoop: func() {
 			c.Log("Service in loop... ", number)
 			number = number + 1

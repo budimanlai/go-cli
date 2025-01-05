@@ -3,7 +3,9 @@ package gocli
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -15,8 +17,6 @@ import (
 type CliHandler = func(c *Cli)
 
 type Cli struct {
-	AppName    string
-	Version    string
 	IsShutdown bool
 
 	Args        *goargs.Args
@@ -24,9 +24,14 @@ type Cli struct {
 	handler     map[string]CliHandler
 	runtimePath string
 	configFile  []string
+	appName     string
+	version     string
+	wg          sync.WaitGroup // WaitGroup untuk sinkronisasi tugas
+	mutex       sync.Mutex     // Mutex untuk status shutdown
+	pidFile     string         // File untuk menyimpan PID
 }
 
-type CliListen struct {
+type CliRunLoop struct {
 	OnLoop     func()
 	OnShutdown func()
 	TimeLoop   time.Duration
@@ -44,6 +49,9 @@ func NewCli() *Cli {
 
 func NewCliWithConfig(config CliOptions) *Cli {
 	c := &Cli{}
+
+	c.appName = config.AppName
+	c.version = config.Version
 
 	c.Config = &goconfig.Config{}
 	c.configFile = config.ConfigFile
@@ -66,6 +74,8 @@ func NewCliWithConfig(config CliOptions) *Cli {
 	}
 	c.runtimePath = config.RuntimePath
 
+	c.pidFile = config.RuntimePath + c.appName + ".pid"
+
 	c.handler = map[string]CliHandler{}
 	c.addDefaultCommand()
 
@@ -86,7 +96,13 @@ func (c *Cli) RuntimePath() string { return c.runtimePath }
 
 func (c *Cli) addDefaultCommand() {
 	c.AddCommandAndAlias("version", "v", func(c *Cli) {
-		fmt.Println(c.AppName, "\nVersi", c.Version)
+		fmt.Println(c.appName, "\nVersi", c.version)
+	})
+	c.AddCommand("start", func(c *Cli) {
+		c.startDaemon()
+	})
+	c.AddCommand("stop", func(c *Cli) {
+		c.stopDaemon()
 	})
 }
 
@@ -106,22 +122,14 @@ func (c *Cli) Log(a ...interface{}) {
 	fmt.Println(a...)
 }
 
-func (c *Cli) Listen(handler CliListen) {
+func (c *Cli) listenSignal(handler CliRunLoop) {
 	// Channel untuk menangkap sinyal sistem
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP) // Tambahkan SIGHUP untuk reload
 
-	var wg sync.WaitGroup // WaitGroup untuk sinkronisasi tugas
-	var mutex sync.Mutex  // Mutex untuk status shutdown
-
-	if handler.TimeLoop < 2 {
-		handler.TimeLoop = 2 // Default minimum 2 detik
-	}
-	ticker := time.NewTicker(handler.TimeLoop * time.Second)
-	defer ticker.Stop() // Pastikan ticker berhenti saat keluar
-
 	// Goroutine untuk menangani sinyal
 	go func() {
+		defer close(sigs) // Ensure the channel is closed
 		for sig := range sigs {
 			switch sig {
 			case syscall.SIGHUP: // Reload konfigurasi
@@ -136,25 +144,25 @@ func (c *Cli) Listen(handler CliListen) {
 					}
 
 					newConfig := *tempConfig // Buat salinan di luar mutex
-					mutex.Lock()
+					c.mutex.Lock()
 					c.Config = &newConfig
-					mutex.Unlock()
+					c.mutex.Unlock()
 					c.Log("Konfigurasi berhasil dimuat ulang.")
 				}()
 
 			case syscall.SIGINT, syscall.SIGTERM: // Shutdown
 				// Tandai shutdown
-				mutex.Lock()
+				c.mutex.Lock()
 				c.IsShutdown = true
-				mutex.Unlock()
+				c.mutex.Unlock()
 
 				// Menjalankan handler OnShutdown jika ada
 				if handler.OnShutdown != nil {
-					wg.Add(1)
+					c.wg.Add(1)
 
 					// Eksekusi handler dalam goroutine terpisah
 					go func() {
-						defer wg.Done()
+						defer c.wg.Done()
 						defer func() {
 							if r := recover(); r != nil {
 								c.Log("Panic terdeteksi di OnShutdown:", r)
@@ -166,38 +174,100 @@ func (c *Cli) Listen(handler CliListen) {
 					}()
 				}
 
-				wg.Wait()
-				os.Exit(0) // Keluar setelah semua tugas selesai
+				c.wg.Wait()
+				signal.Stop(sigs) // Stop receiving signals
+				os.Exit(0)        // Keluar setelah semua tugas selesai
 			}
 		}
 	}()
+}
+
+func (c *Cli) RunLoop(handler CliRunLoop) {
+	c.listenSignal(handler)
+
+	if handler.TimeLoop < 2 {
+		handler.TimeLoop = 2 * time.Second // Default minimum 2 detik
+	}
+	ticker := time.NewTicker(handler.TimeLoop)
+	defer ticker.Stop() // Pastikan ticker berhenti saat keluar
 
 	// Loop utama untuk menjalankan tugas
 	c.IsShutdown = false
 	if handler.OnLoop != nil {
 		for range ticker.C { // Menggunakan for range
-			mutex.Lock()
+			c.mutex.Lock()
 			if c.IsShutdown {
-				mutex.Unlock()
+				c.mutex.Unlock()
 				c.Log("Waiting shutdown")
-				wg.Wait()
+				c.wg.Wait()
 				return
 			}
-			mutex.Unlock()
+			c.mutex.Unlock()
 
-			wg.Add(1)        // Sinkronisasi tugas
-			handler.OnLoop() // Proses tugas (blocking)
-			wg.Done()
+			c.wg.Add(1) // Sinkronisasi tugas
+			go func() {
+				defer c.wg.Done() // Ensure Done is called even if OnLoop panics
+				handler.OnLoop()  // Proses tugas (blocking)
+			}()
 		}
 	}
 }
 
 func (c *Cli) Run() error {
-	if h, e := c.handler[c.Args.Command]; e {
+	if h, exists := c.handler[c.Args.Command]; exists {
 		h(c)
 	} else {
-		fmt.Print(fmt.Sprintf("Command '%s' not found", c.Args.Command) + "\n")
+		fmt.Printf("Command '%s' not found\n", c.Args.Command)
 	}
 
 	return nil
+}
+
+func (c *Cli) startDaemon() {
+	logFile, err := os.OpenFile(c.runtimePath+"daemon.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Println("Failed to open log file:", err)
+		return
+	}
+	defer logFile.Close()
+
+	cmd := exec.Command(os.Args[0], "run")
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // Detach the process
+	err = cmd.Start()
+	if err != nil {
+		fmt.Println("Failed to start daemon:", err)
+		return
+	}
+	err = os.WriteFile(c.pidFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0644)
+	if err != nil {
+		fmt.Println("Failed to write PID file:", err)
+		return
+	}
+	os.Exit(0)
+}
+
+func (c *Cli) stopDaemon() {
+	pidData, err := os.ReadFile(c.pidFile)
+	if err != nil {
+		fmt.Println("Failed to read PID file:", err)
+		return
+	}
+	pid, err := strconv.Atoi(string(pidData))
+	if err != nil {
+		fmt.Println("Invalid PID:", err)
+		return
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		fmt.Println("Failed to find process:", err)
+		return
+	}
+	err = process.Signal(syscall.SIGTERM)
+	if err != nil {
+		fmt.Println("Failed to stop process:", err)
+		return
+	}
+	os.Remove(c.pidFile)
 }

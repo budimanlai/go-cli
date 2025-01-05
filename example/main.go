@@ -9,16 +9,17 @@ import (
 
 func main() {
 	cli := gocli.NewCliWithConfig(gocli.CliOptions{
+		AppName:     "Go CLI Demo",
+		Version:     "1.0.0",
 		ConfigFile:  []string{"config/main.conf"},
-		RuntimePath: "output/",
+		RuntimePath: "runtime/",
 	})
-	cli.AppName = "Go CLI Demo"
-	cli.Version = "1.0.0"
 
 	cli.AddCommand("random_string", commands.RandomString)
 	cli.AddCommand("world", commands.World)
 	cli.AddCommand("clean_log", commands.Clearlog)
 	cli.AddCommand("listen", commands.Listen)
+	cli.AddCommand("run", commands.Listen)
 
 	e := cli.Run()
 	if e != nil {
