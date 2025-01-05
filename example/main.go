@@ -18,8 +18,8 @@ func main() {
 	cli.AddCommand("random_string", commands.RandomString)
 	cli.AddCommand("world", commands.World)
 	cli.AddCommand("clean_log", commands.Clearlog)
-	cli.AddCommand("listen", commands.Listen)
-	cli.AddCommand("run", commands.Listen)
+	cli.StartService("run", "mulai", commands.Listen)
+	cli.StopService("berhenti")
 
 	e := cli.Run()
 	if e != nil {

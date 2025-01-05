@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"syscall"
@@ -74,7 +75,9 @@ func NewCliWithConfig(config CliOptions) *Cli {
 	}
 	c.runtimePath = config.RuntimePath
 
-	c.pidFile = config.RuntimePath + c.appName + ".pid"
+	// Get the binary file name
+	binaryName := filepath.Base(os.Args[0])
+	c.pidFile = config.RuntimePath + binaryName + ".pid"
 
 	c.handler = map[string]CliHandler{}
 	c.addDefaultCommand()
@@ -97,12 +100,6 @@ func (c *Cli) RuntimePath() string { return c.runtimePath }
 func (c *Cli) addDefaultCommand() {
 	c.AddCommandAndAlias("version", "v", func(c *Cli) {
 		fmt.Println(c.appName, "\nVersi", c.version)
-	})
-	c.AddCommand("start", func(c *Cli) {
-		c.startDaemon()
-	})
-	c.AddCommand("stop", func(c *Cli) {
-		c.stopDaemon()
 	})
 }
 
@@ -176,7 +173,8 @@ func (c *Cli) listenSignal(handler CliRunLoop) {
 
 				c.wg.Wait()
 				signal.Stop(sigs) // Stop receiving signals
-				os.Exit(0)        // Keluar setelah semua tugas selesai
+
+				os.Exit(0) // Keluar setelah semua tugas selesai
 			}
 		}
 	}()
@@ -223,15 +221,27 @@ func (c *Cli) Run() error {
 	return nil
 }
 
-func (c *Cli) startDaemon() {
-	logFile, err := os.OpenFile(c.runtimePath+"daemon.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+func (c *Cli) StartService(command string, startCmd string, handler CliHandler) {
+	c.AddCommand(command, handler)
+	c.AddCommand(startCmd, func(c *Cli) {
+		c.startDaemon(command)
+	})
+
+}
+
+func (c *Cli) startDaemon(command string) {
+	// Get the binary file name
+	binaryName := filepath.Base(os.Args[0])
+	logFileName := c.runtimePath + binaryName + ".log"
+
+	logFile, err := os.OpenFile(logFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		fmt.Println("Failed to open log file:", err)
 		return
 	}
 	defer logFile.Close()
 
-	cmd := exec.Command(os.Args[0], "run")
+	cmd := exec.Command(os.Args[0], command)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // Detach the process
@@ -246,6 +256,12 @@ func (c *Cli) startDaemon() {
 		return
 	}
 	os.Exit(0)
+}
+
+func (c *Cli) StopService(stopCmd string) {
+	c.AddCommand(stopCmd, func(c *Cli) {
+		c.stopDaemon()
+	})
 }
 
 func (c *Cli) stopDaemon() {
