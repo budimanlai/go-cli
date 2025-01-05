@@ -27,9 +27,9 @@ type Cli struct {
 	configFile  []string
 	appName     string
 	version     string
-	wg          sync.WaitGroup // WaitGroup untuk sinkronisasi tugas
-	mutex       sync.Mutex     // Mutex untuk status shutdown
-	pidFile     string         // File untuk menyimpan PID
+	wg          sync.WaitGroup // WaitGroup for task synchronization
+	mutex       sync.Mutex     // Mutex for shutdown status
+	pidFile     string         // File to store PID
 }
 
 type CliRunLoop struct {
@@ -42,12 +42,17 @@ const (
 	YYYYMMDDHHMMSS string = "2006-01-02 15:04:05"
 )
 
+// NewCli creates a new instance of Cli with default options.
 func NewCli() *Cli {
 	c := NewCliWithConfig(CliOptions{})
 
 	return c
 }
 
+// NewCliWithConfig creates a new instance of Cli with the provided options.
+//
+// Parameters:
+// - config: CliOptions struct containing configuration options for the CLI.
 func NewCliWithConfig(config CliOptions) *Cli {
 	c := &Cli{}
 
@@ -85,6 +90,7 @@ func NewCliWithConfig(config CliOptions) *Cli {
 	return c
 }
 
+// LoadConfig loads the configuration files specified in the Cli instance.
 func (c *Cli) LoadConfig() {
 	if len(c.configFile) != 0 {
 		e := c.Config.Open(c.configFile...)
@@ -95,23 +101,40 @@ func (c *Cli) LoadConfig() {
 	}
 }
 
+// RuntimePath returns the runtime path of the Cli instance.
 func (c *Cli) RuntimePath() string { return c.runtimePath }
 
+// addDefaultCommand adds the default commands to the CLI instance.
 func (c *Cli) addDefaultCommand() {
 	c.AddCommandAndAlias("version", "v", func(c *Cli) {
 		fmt.Println(c.appName, "\nVersi", c.version)
 	})
 }
 
+// AddCommandAndAlias adds a command and its alias to the CLI instance.
+//
+// Parameters:
+// - command: The main command string.
+// - alias: The alias for the command.
+// - handler: The function to handle the command.
 func (c *Cli) AddCommandAndAlias(command string, alias string, handler CliHandler) {
 	c.handler[command] = handler
 	c.handler[alias] = handler
 }
 
+// AddCommand adds a command to the CLI instance.
+//
+// Parameters:
+// - command: The command string.
+// - handler: The function to handle the command.
 func (c *Cli) AddCommand(command string, handler CliHandler) {
 	c.handler[command] = handler
 }
 
+// Log logs a message with a timestamp.
+//
+// Parameters:
+// - a: The message to log.
 func (c *Cli) Log(a ...interface{}) {
 	now := time.Now()
 	date := now.Format(YYYYMMDDHHMMSS)
@@ -119,50 +142,54 @@ func (c *Cli) Log(a ...interface{}) {
 	fmt.Println(a...)
 }
 
+// listenSignal listens for system signals and handles them accordingly.
+//
+// Parameters:
+// - handler: A CliRunLoop struct containing the OnLoop and OnShutdown functions and the TimeLoop duration.
 func (c *Cli) listenSignal(handler CliRunLoop) {
-	// Channel untuk menangkap sinyal sistem
+	// Channel to capture system signals
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP) // Tambahkan SIGHUP untuk reload
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP) // Add SIGHUP for reload
 
-	// Goroutine untuk menangani sinyal
+	// Goroutine to handle signals
 	go func() {
 		defer close(sigs) // Ensure the channel is closed
 		for sig := range sigs {
 			switch sig {
-			case syscall.SIGHUP: // Reload konfigurasi
-				c.Log("Sinyal reload konfigurasi diterima.")
+			case syscall.SIGHUP: // Reload configuration
+				c.Log("Configuration reload signal received.")
 				go func() {
-					c.Log("Memuat ulang konfigurasi...")
+					c.Log("Reloading configuration...")
 					tempConfig := &goconfig.Config{}
 					err := tempConfig.Open(c.configFile...)
 					if err != nil {
-						c.Log("Gagal memuat konfigurasi:", err)
+						c.Log("Failed to load configuration:", err)
 						return
 					}
 
-					newConfig := *tempConfig // Buat salinan di luar mutex
+					newConfig := *tempConfig // Create a copy outside the mutex
 					c.mutex.Lock()
 					c.Config = &newConfig
 					c.mutex.Unlock()
-					c.Log("Konfigurasi berhasil dimuat ulang.")
+					c.Log("Configuration successfully reloaded.")
 				}()
 
 			case syscall.SIGINT, syscall.SIGTERM: // Shutdown
-				// Tandai shutdown
+				// Mark shutdown
 				c.mutex.Lock()
 				c.IsShutdown = true
 				c.mutex.Unlock()
 
-				// Menjalankan handler OnShutdown jika ada
+				// Execute OnShutdown handler if present
 				if handler.OnShutdown != nil {
 					c.wg.Add(1)
 
-					// Eksekusi handler dalam goroutine terpisah
+					// Execute handler in a separate goroutine
 					go func() {
 						defer c.wg.Done()
 						defer func() {
 							if r := recover(); r != nil {
-								c.Log("Panic terdeteksi di OnShutdown:", r)
+								c.Log("Panic detected in OnShutdown:", r)
 							}
 						}()
 						c.Log("Start shutdown...")
@@ -174,25 +201,34 @@ func (c *Cli) listenSignal(handler CliRunLoop) {
 				c.wg.Wait()
 				signal.Stop(sigs) // Stop receiving signals
 
-				os.Exit(0) // Keluar setelah semua tugas selesai
+				os.Exit(0) // Exit after all tasks are completed
 			}
 		}
 	}()
 }
 
+// RunLoop starts the main loop for the CLI application.
+// It listens for system signals and executes the provided handler functions.
+//
+// Parameters:
+// - handler: A CliRunLoop struct containing the OnLoop and OnShutdown functions and the TimeLoop duration.
+//
+// The loop will execute the OnLoop function at intervals specified by TimeLoop.
+// If a SIGINT or SIGTERM signal is received, the OnShutdown function will be executed and the application will exit.
+// If a SIGHUP signal is received, the configuration will be reloaded.
 func (c *Cli) RunLoop(handler CliRunLoop) {
 	c.listenSignal(handler)
 
 	if handler.TimeLoop < 2 {
-		handler.TimeLoop = 2 * time.Second // Default minimum 2 detik
+		handler.TimeLoop = 2 * time.Second // Default minimum 2 seconds
 	}
 	ticker := time.NewTicker(handler.TimeLoop)
-	defer ticker.Stop() // Pastikan ticker berhenti saat keluar
+	defer ticker.Stop() // Ensure ticker stops on exit
 
-	// Loop utama untuk menjalankan tugas
+	// Main loop to run tasks
 	c.IsShutdown = false
 	if handler.OnLoop != nil {
-		for range ticker.C { // Menggunakan for range
+		for range ticker.C { // Using for range
 			c.mutex.Lock()
 			if c.IsShutdown {
 				c.mutex.Unlock()
@@ -202,15 +238,18 @@ func (c *Cli) RunLoop(handler CliRunLoop) {
 			}
 			c.mutex.Unlock()
 
-			c.wg.Add(1) // Sinkronisasi tugas
+			c.wg.Add(1) // Task synchronization
 			go func() {
 				defer c.wg.Done() // Ensure Done is called even if OnLoop panics
-				handler.OnLoop()  // Proses tugas (blocking)
+				handler.OnLoop()  // Process task (blocking)
 			}()
 		}
 	}
 }
 
+// Run executes the command specified in the CLI arguments.
+//
+// Returns an error if the command is not found.
 func (c *Cli) Run() error {
 	if h, exists := c.handler[c.Args.Command]; exists {
 		h(c)
@@ -221,6 +260,12 @@ func (c *Cli) Run() error {
 	return nil
 }
 
+// StartService adds a command to start a service and a command to start the service as a daemon.
+//
+// Parameters:
+// - command: The command to start the service.
+// - startCmd: The command to start the service as a daemon.
+// - handler: The function to handle the service command.
 func (c *Cli) StartService(command string, startCmd string, handler CliHandler) {
 	c.AddCommand(command, handler)
 	c.AddCommand(startCmd, func(c *Cli) {
@@ -229,6 +274,10 @@ func (c *Cli) StartService(command string, startCmd string, handler CliHandler) 
 
 }
 
+// startDaemon starts the specified command as a daemon process.
+//
+// Parameters:
+// - command: The command to start as a daemon.
 func (c *Cli) startDaemon(command string) {
 	// Get the binary file name
 	binaryName := filepath.Base(os.Args[0])
@@ -241,7 +290,10 @@ func (c *Cli) startDaemon(command string) {
 	}
 	defer logFile.Close()
 
-	cmd := exec.Command(os.Args[0], command)
+	// Include additional arguments
+	args := append([]string{command}, c.Args.GetRawArgs()[1:]...)
+
+	cmd := exec.Command(os.Args[0], args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // Detach the process
@@ -258,12 +310,17 @@ func (c *Cli) startDaemon(command string) {
 	os.Exit(0)
 }
 
+// StopService adds a command to stop a running daemon service.
+//
+// Parameters:
+// - stopCmd: The command to stop the daemon service.
 func (c *Cli) StopService(stopCmd string) {
 	c.AddCommand(stopCmd, func(c *Cli) {
 		c.stopDaemon()
 	})
 }
 
+// stopDaemon stops the running daemon process.
 func (c *Cli) stopDaemon() {
 	pidData, err := os.ReadFile(c.pidFile)
 	if err != nil {

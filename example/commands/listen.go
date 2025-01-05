@@ -11,6 +11,12 @@ func Listen(c *gocli.Cli) {
 	c.Log("Press ctrl+c to stop the service")
 
 	number := c.Args.GetIntOr("number", 1)
+	port := c.Args.GetIntOr("port", 8080)
+	args1 := c.Args.GetString("args1")
+
+	c.Log("Number: ", number)
+	c.Log("Port: ", port)
+	c.Log("Args1: ", args1)
 
 	c.RunLoop(gocli.CliRunLoop{
 		TimeLoop: 2 * time.Second,
