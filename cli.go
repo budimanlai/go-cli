@@ -153,7 +153,6 @@ func (c *Cli) listenSignal(handler CliRunLoop) {
 
 	// Goroutine to handle signals
 	go func() {
-		defer close(sigs) // Ensure the channel is closed
 		for sig := range sigs {
 			switch sig {
 			case syscall.SIGHUP: // Reload configuration
@@ -167,9 +166,8 @@ func (c *Cli) listenSignal(handler CliRunLoop) {
 						return
 					}
 
-					newConfig := *tempConfig // Create a copy outside the mutex
 					c.mutex.Lock()
-					c.Config = &newConfig
+					c.Config = tempConfig
 					c.mutex.Unlock()
 					c.Log("Configuration successfully reloaded.")
 				}()
@@ -239,7 +237,8 @@ func (c *Cli) RunLoop(handler CliRunLoop) {
 			c.mutex.Unlock()
 
 			c.wg.Add(1) // Task synchronization
-			go func() {
+			// Run synchronously to avoid goroutine accumulation
+			func() {
 				defer c.wg.Done() // Ensure Done is called even if OnLoop panics
 				handler.OnLoop()  // Process task (blocking)
 			}()
@@ -283,6 +282,12 @@ func (c *Cli) startDaemon(command string) {
 	binaryName := filepath.Base(os.Args[0])
 	logFileName := c.runtimePath + binaryName + ".log"
 
+	// Ensure runtimePath exists
+	if err := os.MkdirAll(c.runtimePath, 0755); err != nil {
+		fmt.Println("Failed to create runtime directory:", err)
+		return
+	}
+
 	logFile, err := os.OpenFile(logFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		fmt.Println("Failed to open log file:", err)
@@ -302,6 +307,7 @@ func (c *Cli) startDaemon(command string) {
 		fmt.Println("Failed to start daemon:", err)
 		return
 	}
+	// Write PID file after ensuring runtimePath exists
 	err = os.WriteFile(c.pidFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0644)
 	if err != nil {
 		fmt.Println("Failed to write PID file:", err)
@@ -335,6 +341,15 @@ func (c *Cli) stopDaemon() {
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		fmt.Println("Failed to find process:", err)
+		return
+	}
+	// Validasi proses: pastikan proses yang di-kill adalah proses daemon yang dimaksud
+	// Cek apakah proses masih berjalan dan merupakan child dari binary ini
+	// (Validasi lebih lanjut bisa menggunakan /proc di Linux, tapi di Go cross-platform terbatas)
+	err = process.Signal(syscall.Signal(0)) // Cek apakah proses masih hidup
+	if err != nil {
+		fmt.Println("Process is not running or already stopped.")
+		os.Remove(c.pidFile)
 		return
 	}
 	err = process.Signal(syscall.SIGTERM)
