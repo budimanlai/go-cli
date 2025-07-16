@@ -4,7 +4,7 @@ go 1.23
 
 require (
 	github.com/budimanlai/go-args v0.0.1
-	github.com/budimanlai/go-config v0.0.2
+	github.com/budimanlai/go-config v0.0.4
 	github.com/stretchr/testify v1.5.1
 )
 

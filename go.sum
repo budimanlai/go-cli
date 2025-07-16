@@ -1,7 +1,7 @@
 github.com/budimanlai/go-args v0.0.1 h1:4prgT5lq4NdUU7GSrb7v5gGYajZD0v9v1s79DAWjwuI=
 github.com/budimanlai/go-args v0.0.1/go.mod h1:b0bfforNqR+7uI0xslP67t+5pztrU0vUnCTzeqXnS8o=
-github.com/budimanlai/go-config v0.0.2 h1:7o7kIKvA20F0UT3UAJn0X+KpjA9Sw+gO0Ve893mlOOo=
-github.com/budimanlai/go-config v0.0.2/go.mod h1:cNdJ3Pd/OSNrPekYRAymhlxsYl0ebHP17r+sMzyBI5Y=
+github.com/budimanlai/go-config v0.0.4 h1:eDiE7rrY9Tf7dNDKIK9Y/2mV7TYZnFDSA+W5ZCFEKoQ=
+github.com/budimanlai/go-config v0.0.4/go.mod h1:cNdJ3Pd/OSNrPekYRAymhlxsYl0ebHP17r+sMzyBI5Y=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
